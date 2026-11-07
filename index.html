@@ -226,8 +226,8 @@ textarea { width: 100%; box-sizing: border-box; font: inherit; color: var(--ink)
 .paste-box { border: 1.5px dashed var(--line); border-radius: var(--radius); padding: 10px 14px; background: var(--surface); }
 .paste-box summary { cursor: pointer; font-weight: 700; }
 .paste-box textarea { width: 100%; margin-top: 8px; }
-.res-item { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line); }
-.res-item:first-child { border-top: 0; }
+.parent-box { background: var(--sunk); border-style: dashed; display: grid; gap: 8px; margin-top: 6px; }
+.parent-box h3 { font-size: 0.95rem; }
 .ja-warn { font-size: 0.86rem; line-height: 1.5; color: var(--ng); background: var(--ng-soft); border-radius: 8px; padding: 6px 10px; }
 .inline-ask { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border-radius: 10px;
   background: var(--accent-soft); }
@@ -394,7 +394,7 @@ footer { font-size: 0.8rem; color: var(--muted); }
     </div>
     <div class="box">
       <h3>3. 娘さんへ</h3>
-      <p>面接官の目を見て、大きな声でこたえよう。聞きとれなかったときは「<span class="en">Pardon?</span>」と言っていいよ。</p>
+      <p>面接官の目を見て、大きな声でこたえよう。聞きとれなかったときは「<span class="en">Pardon?</span>」と言っていいよ。<span id="pardon-web" hidden>Pardon? と言うと、面接官が もう一度 読んでくれます。</span></p>
       <div class="check-line">
         <label class="toggle"><input type="checkbox" id="opt-entrance" checked> 入室のあいさつから練習する</label>
         <label class="toggle"><input type="checkbox" id="opt-subs"> 面接官のセリフを字幕で出す（ふだんはオフ）</label>
@@ -425,7 +425,7 @@ footer { font-size: 0.8rem; color: var(--muted); }
     <div class="ctrl" id="ctrl">
       <div class="ctrl-top">
         <div>
-          <div class="who">保護者の操作</div>
+          <div class="who" id="who">保護者の操作</div>
           <div class="cstatus" id="cstatus" role="status" aria-live="polite"></div>
         </div>
         <div class="btnrow">
@@ -441,12 +441,12 @@ footer { font-size: 0.8rem; color: var(--muted); }
         <p class="ja-warn" id="ans-warn" role="status" hidden></p>
       </div>
       <div class="inline-ask" id="yn-ask" hidden>
-        <span>娘さんの答えは Yes と No のどちらでしたか？</span>
+        <span id="yn-q">娘さんの答えは Yes と No のどちらでしたか？</span>
         <button class="btn quiet" id="yn-yes" type="button">Yes</button>
         <button class="btn quiet" id="yn-no" type="button">No</button>
       </div>
       <div class="inline-ask" id="empty-ask" hidden>
-        <span>答えの欄が空です。答えなしで次へ進みますか？</span>
+        <span id="empty-q">答えの欄が空です。答えなしで次へ進みますか？</span>
         <button class="btn quiet" id="empty-go" type="button">答えなしで進む</button>
         <button class="btn" id="empty-back" type="button">入力しなおす</button>
       </div>
@@ -456,28 +456,6 @@ footer { font-size: 0.8rem; color: var(--muted); }
   <!-- REVIEW -->
   <section id="v-review" hidden aria-label="講評">
     <div class="review" id="review"></div>
-  </section>
-
-  <!-- RESULT (web version: the review is done in the Claude app) -->
-  <section id="v-result" class="room" hidden aria-labelledby="h-result">
-    <div class="room-head">
-      <h2 id="h-result">おつかれさま！</h2>
-      <button class="link" type="button" data-home>ホームへもどる</button>
-    </div>
-    <div class="box">
-      <h3>講評を受ける（保護者の方へ）</h3>
-      <ol class="steps">
-        <li><div>「結果をコピー」を押します。</div></li>
-        <li><div>Claude の練習アプリを開き、ホームの「マイクで聞き取る面接ページの結果を貼り付けて、講評を受ける」に貼り付けます。</div></li>
-      </ol>
-      <div class="btnrow"><button class="btn big" id="btn-copy" type="button">📋 結果をコピー</button></div>
-      <p class="status" id="copy-status" role="status" aria-live="polite"></p>
-      <textarea id="copy-box" rows="3" readonly hidden></textarea>
-    </div>
-    <div class="box">
-      <h3>聞き取った答え</h3>
-      <div id="result-answers"></div>
-    </div>
   </section>
 
   <!-- HISTORY -->
@@ -569,6 +547,294 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 const cardById = id => CARDS.find(c => c.id === id);
 const picImg = (c, side) => `<img src="${esc(side === "A" ? c.imgA : c.imgB)}" width="960" height="717" alt="Picture ${side}" decoding="async">`;
+/* ---------- web version helpers: hearing "Pardon?", tidying what the browser heard, the quick review ----------
+   Inlined into the page by build_page.py; also loaded by node for the unit tests (module.exports at the end). */
+
+/* "Pardon?" and friends: the whole utterance must be a request to repeat (fillers and "please" allowed) */
+const ASK_CORE = new RegExp("^(?:" + [
+  "i beg your pardon", "pardon(?: me)?", "parton", "sorry", "i'm sorry", "excuse me", "what", "huh",
+  "(?:could|can|would|will) you (?:please )?(?:say|repeat|tell me|ask)(?: that| it| this| the question| me)?(?: again| one more time| once more)?",
+  "(?:say|repeat) (?:that|it|the question)(?: again)?", "say again", "one more time", "once more", "again",
+  "what did you say", "what was the question"
+].join("|") + ")$");
+function isRepeatAsk(raw) {
+  const s = String(raw || "").toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z' ]+/g, " ")
+    .replace(/\b(um+|uh+|er+|ah+|oh|hmm+|well|please|sir|ma'am|teacher)\b/g, " ").replace(/\s+/g, " ").trim();
+  if (!s || s.split(" ").length > 9) return false;
+  const t = s.replace(/^(?:sorry|i'm sorry|excuse me|pardon(?: me)?) (?=\S)/, "");
+  return ASK_CORE.test(s) || ASK_CORE.test(t);
+}
+
+/* iPad / iPhone Safari can send overlapping results ("hello", "hello world") or the same phrase twice:
+   keep the longer one, so words are not doubled */
+function collapsePhrases(parts) {
+  const kept = [];
+  for (const raw of parts) {
+    const p = String(raw || "").trim();
+    if (!p) continue;
+    const last = kept[kept.length - 1];
+    const a = p.toLowerCase(), b = last ? last.toLowerCase() : "";
+    if (last && a.startsWith(b)) kept[kept.length - 1] = p;
+    else if (last && b.startsWith(a)) continue;
+    else kept.push(p);
+  }
+  return kept.join(" ");
+}
+
+/* ---------- quick review: simple rules, written for the child (Claude gives the detailed review) ---------- */
+const QR_STOP = new Set(("a an the to of and or in on at for with by from into onto about up down out off over " +
+  "their his her its my your our they them these those this that there here it is are was were be been am " +
+  "i you he she we me him us not no yes some many more most also very too so but because can can't could will would " +
+  "do does did don't doesn't didn't have has had one two three people person um uh well").split(" "));
+const qrNorm = s => String(s || "").toLowerCase().replace(/[’‘`]/g, "'").replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
+const qrWords = s => qrNorm(s).split(" ").filter(Boolean);
+function qrStem(w) {
+  w = w.replace(/'s$/, "");
+  if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ies")) w = w.slice(0, -3) + "y";
+  else if (w.length > 4 && /(ches|shes|sses|xes)$/.test(w)) w = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) w = w.slice(0, -1);
+  else if (w.length > 4 && w.endsWith("ed")) w = w.slice(0, -2);
+  if (w.length > 3 && w.endsWith("e")) w = w.slice(0, -1);
+  if (w.length > 3 && /([b-df-hj-np-tv-z])\1$/.test(w)) w = w.slice(0, -1);
+  return w;
+}
+const qrKeys = s => [...new Set(qrWords(s).filter(w => !QR_STOP.has(w) && w.length > 2).map(qrStem))];
+function qrOverlap(answer, model) {
+  const k = qrKeys(model);
+  if (!k.length) return 0;
+  const got = new Set(qrWords(answer).map(qrStem));
+  return k.filter(x => got.has(x)).length / k.length;
+}
+function qrLcs(a, b) {
+  let prev = new Array(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = new Array(b.length + 1).fill(0);
+    for (let j = 1; j <= b.length; j++) cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+    prev = cur;
+  }
+  return prev[b.length];
+}
+const LEAD = "(?:(?:um+|uh+|er+|well|so|and|okay|ok|oh)\\s+)*";
+/* reasons after Why? / Please tell me more.: two of them, one, or none */
+function qrReasons(text) {
+  const t = qrNorm(text), wc = t ? t.split(" ").length : 0;
+  const sentences = (String(text || "").match(/[^.!?]+[.!?]/g) || []).filter(s => qrWords(s).length >= 3).length;
+  const two = /\balso\b/.test(t) || sentences >= 2 || (t.match(/\bbecause\b/g) || []).length >= 2
+    || (/\b(and|but|so)\b/.test(t) && wc >= 9) || wc >= 16;
+  return two ? 2 : wc >= 4 ? 1 : 0;
+}
+const qrEmph = (text, re) => text.replace(re, m => `**${m}**`);
+const QR_PEOPLE = "man|woman|boy|girl|men|women|boys|girls|lady|guy|kid|kids|child|children|person|people|baby|he|she|they";
+const QR_PLURAL = { men: "man", women: "woman", boys: "boy", girls: "girl", kids: "kid", children: "child", people: "person" };
+const qrClass = n => QR_PLURAL[n] || n;
+const qrFits = (said, model) => said === model || said === "person" || said === "they"
+  || (said === "he" && (model === "man" || model === "boy")) || (said === "she" && (model === "woman" || model === "girl"))
+  || (said === "guy" && model === "man") || (said === "lady" && model === "woman")
+  || ((said === "kid" || said === "child" || said === "baby") && (model === "boy" || model === "girl"));
+const QR_FORM = /\b(?:is|are|was|were|\w+'s)\s+(?:\w+\s+){0,2}?(?!(?:thing|something|anything|nothing|everything|king|ring|spring|string|morning|evening|ceiling|wing)\b)\w{2,}ing\b/;
+
+/* No.2: who was described with "is + ~ing" — matched to the five people on the card by their action or thing */
+function qrPeople(c, text) {
+  const t = qrNorm(text);
+  const re = new RegExp(`\\b(?:(a|an|the|one|two|three|another|other|some)\\s+)?(${QR_PEOPLE})\\b`, "g");
+  const marks = [];
+  let m;
+  while ((m = re.exec(t))) marks.push({ at: m.index, noun: qrClass(m[2]), two: /^(two|three)$/.test(m[1] || "") || Boolean(QR_PLURAL[m[2]]) });
+  const chunks = marks.map((k, i) => {
+    const body = t.slice(k.at, i + 1 < marks.length ? marks[i + 1].at : t.length);
+    return { noun: k.noun, body, form: QR_FORM.test(body), stems: new Set(qrWords(body).map(qrStem)), used: false };
+  });
+  const models = c.a2.map(s => {
+    const w = qrWords(s);
+    const subj = qrClass(w.find(x => new RegExp(`^(${QR_PEOPLE})$`).test(x)) || "person");
+    const vi = w.findIndex(x => x === "is" || x === "are");
+    const verb = vi >= 0 && w[vi + 1] ? qrStem(w[vi + 1]) : "";
+    const things = qrKeys(w.slice(vi + 2).join(" "));
+    return { subj, verb, things, chunk: null };
+  });
+  const score = (mo, ch) => (mo.verb && ch.stems.has(mo.verb) ? 2 : 0) + mo.things.filter(x => ch.stems.has(x)).length;
+  // 1) the action or the thing is in what she said (same kind of person first, then anyone)
+  for (const pass of [true, false]) {
+    for (const mo of models) {
+      if (mo.chunk) continue;
+      let best = null, bestScore = 0;
+      for (const ch of chunks) {
+        if (ch.used || (pass && !qrFits(ch.noun, mo.subj))) continue;
+        const sc = score(mo, ch) + (ch.form ? 0.5 : 0);
+        if (sc > bestScore + 1e-9 && score(mo, ch) > 0) { best = ch; bestScore = sc; }
+      }
+      if (best) { best.used = true; mo.chunk = best; }
+    }
+  }
+  // 2) the rest: a sentence about the same kind of person in the right form (the words may have been misheard)
+  for (const mo of models) {
+    if (mo.chunk) continue;
+    const ch = chunks.find(x => !x.used && x.form && qrFits(x.noun, mo.subj) && x.noun !== "they");
+    if (ch) { ch.used = true; mo.chunk = ch; }
+  }
+  const ok = models.filter(mo => mo.chunk && mo.chunk.form).length;
+  return {
+    count: Math.min(5, ok),
+    noIs: models.some(mo => mo.chunk && !mo.chunk.form) || (chunks.length > 0 && !chunks.some(ch => ch.form)),
+    areOne: /\b(?:a|an|the)\s+(?:man|woman|boy|girl|lady)\s+are\b/.test(t)
+  };
+}
+
+function quickReview(session, c) {
+  const a = session.answers || {};
+  const items = [], goals = [];
+  const yesNoOf = (rec, first) => rec?.yn || (/^(no|nope|not|i don't|i do not|i'm not|i haven't|i can't)\b/.test(qrNorm(first)) ? "no" : "yes");
+  const add = (it, goal) => { items.push(it); if (goal && it.mark !== "◎" && it.mark !== "-") goals.push({ goal, rank: it.mark === "△" ? 0 : 1, id: it.id }); };
+  const none = (id, say, sayLine, point) => ({ id, mark: "-", count: null, good: "", tip: "答えが 聞きとれなかったよ。大きな 声で 答えよう。",
+    say, sayLine, sayLabel: "おてほん", point });
+
+  /* reading aloud */
+  const rd = qrWords(a.read?.text).map(qrStem);
+  if (rd.length >= 3) {
+    const ref = qrWords(c.title + " " + c.passage).map(qrStem);
+    const cover = qrLcs(ref, rd) / ref.length;
+    const lastSent = (c.passage.match(/[^.!?]+[.!?]*/g) || [c.passage]).pop();
+    const tail = qrKeys(lastSent);
+    const reachedEnd = tail.filter(w => rd.includes(w)).length >= Math.ceil(tail.length / 2);
+    const tw = qrKeys(c.title), head = new Set(rd.slice(0, tw.length + 4));
+    const titleHit = tw.every(w => head.has(w));
+    const mark = cover >= 0.9 && reachedEnd ? "◎" : cover >= 0.5 ? "○" : "△";
+    const tip = mark === "△" ? "大きな 声で、さいごまで 読もう。" : !reachedEnd ? "とまらずに、さいごの 文まで 読もう。"
+      : !titleHit ? "タイトルも はっきり 読もう。" : mark === "◎" ? "その ちょうしで 読もう！" : "ゆっくり、はっきり 読もう。";
+    add({ id: "read", mark, count: null, good: mark === "◎" ? "さいごまで しっかり 読めたね！" : mark === "○" ? (reachedEnd ? "さいごまで 読めたね。" : "がんばって 読めたね。") : "声に 出して 読めたね。",
+      tip, say: "", point: "" },
+      mark === "△" ? "音読：さいごまで 大きな 声で" : !reachedEnd ? "音読：とまらずに さいごまで" : !titleHit ? "音読：タイトルから はっきり" : "音読：ゆっくり はっきり");
+  }
+
+  /* No.1 */
+  {
+    const how = /^by\b/i.test(c.a1);
+    const say1 = qrEmph(c.a1, /^(By \w+ing|Because)\b/), line = `c${c.id}_a1`, pt = how ? "By ～ing ＝ ～することで" : "Because ～ ＝ ～だから";
+    const t = qrNorm(a.q1?.text);
+    if (!t) add(none("q1", say1, line, pt), how ? "No.1：How ～? には By ～ing で 答える" : "No.1：Why ～? には Because ～ で");
+    else {
+      const form = new RegExp(how ? `^${LEAD}by\\s+\\w+ing\\b` : `^${LEAD}(because|cause|cuz|coz)\\b`).test(t);
+      const content = qrOverlap(t, c.a1.replace(/^(By|Because)\s+/i, "")) >= 0.5;
+      const cuz = !how && new RegExp(`^${LEAD}(cause|cuz|coz)\\b`).test(t);
+      const mark = form && content ? "◎" : form || content ? "○" : "△";
+      add({ id: "q1", mark, count: null,
+        good: form && content ? (how ? "By ～ing で ばっちり 答えられたね！" : "Because ～ で ばっちり 答えられたね！")
+          : content ? "答えの 中身は 合ってるね。" : form ? (how ? "By ～ing の 形で 言えたね。" : "Because ～ の 形で 言えたね。") : "がんばって 答えられたね。",
+        tip: !form ? (how ? "How ～? には By ～ing で 答えよう。" : "Why ～? には Because ～ で 答えよう。")
+          : cuz ? "cuz では なく because と 言おう。"
+          : !content ? (how ? "by doing so や in this way の 前を さがそう。" : "so の 前を さがそう。") : "つぎも この 形で 答えよう！",
+        say: say1, sayLine: line, sayLabel: "おてほん", point: pt },
+        !form ? (how ? "No.1：How ～? には By ～ing で 答える" : "No.1：Why ～? には Because ～ で") : "No.1：本文の 答えの 文を さがす");
+    }
+  }
+
+  /* No.2 */
+  {
+    const say2 = c.a2.map(s => qrEmph(s, /\b(is|are) \w+ing\b/)).join(" "), line = `c${c.id}_a2`, pt = "is ＋ ～ing ＝ ～しているところ";
+    const t = qrNorm(a.q2?.text);
+    if (!t) add(none("q2", say2, line, pt), "No.2：5人 ぜんぶ is ＋ ～ing で");
+    else {
+      const p = qrPeople(c, t), n = p.count;
+      const mark = n >= 5 ? "◎" : n >= 3 ? "○" : "△";
+      add({ id: "q2", mark, count: n,
+        good: n >= 5 ? "5人 ぜんぶ 言えたね！" : n >= 1 ? `${n}人 言えたね。` : "絵の ようすを 言えたね。",
+        tip: n >= 5 ? (p.areOne ? "1人の ときは are では なく is だよ。" : "つぎも 5人 ぜんぶ 言おう！")
+          : p.noIs ? "is を わすれずに、A man is ～ing. の 形で。" : n >= 3 ? "5人 ぜんぶ 言えるように しよう。" : "絵を よく 見て、5人 ぜんぶ 言おう。",
+        say: say2, sayLine: line, sayLabel: "おてほん", point: pt },
+        p.noIs ? "No.2：A man is ～ing. の 形で 言う" : "No.2：5人 ぜんぶ is ＋ ～ing で");
+    }
+  }
+
+  /* No.3 */
+  {
+    const say3 = qrEmph(c.a3, /\b(can't|because|wants to|but|so|is thinking of|is going to|found)\b/g), line = `c${c.id}_a3`;
+    const pt = /because/.test(c.a3) ? "can't ～ because ～ ＝ ～できない、なぜなら" : /\bbut\b/.test(c.a3) ? "wants to ～, but ～ ＝ ～したいけど"
+      : /thinking of/.test(c.a3) ? "is thinking of ～ing ＝ ～しようかと 考えている" : "～, so ～ ＝ ～なので、～";
+    const pron = /^the (man|boy)\b/i.test(c.subject_b) ? "he" : "she", Pron = pron === "he" ? "He" : "She";
+    const t = qrNorm(a.q3?.text);
+    if (!t) add(none("q3", say3, line, pt), "No.3：because や but で つなぐ");
+    else {
+      const wc = t.split(" ").length;
+      const conn = /\b(because|cause|cuz|but|so)\b/.test(t) || (/\band\b/.test(t) && /\band is thinking\b/i.test(c.a3));
+      const starts = new RegExp(`^${LEAD}(${pron}|the (?:man|woman|boy|girl|lady))\\b`).test(t);
+      const mark = conn && wc >= 7 ? "◎" : wc >= 4 ? "○" : "△";
+      add({ id: "q3", mark, count: null,
+        good: conn ? "つなぎことばで 2つの ことを つなげたね！" : wc >= 4 ? "絵の ようすを 言えたね。" : "がんばって 答えられたね。",
+        tip: !conn ? "because や but で 2つの ことを つなげよう。" : !starts ? `さいしょは ${Pron} ～ で はじめよう。` : "つぎも つなぎことばを 使おう！",
+        say: say3, sayLine: line, sayLabel: "おてほん", point: pt },
+        !conn ? "No.3：because や but で つなぐ" : `No.3：${Pron} ～ で はじめて つなぐ`);
+    }
+  }
+
+  /* No.4 */
+  {
+    const rec = a.q4 || {}, first = qrNorm(rec.first), yn = yesNoOf(rec, first);
+    const std = yn === "no" ? "No, I don't think so." : "Yes, I think so.";
+    const model = yn === "no" ? c.a4_no : c.a4_yes;
+    const say4 = `**${std}** ` + qrEmph(model, /\bAlso,/), line = `c${c.id}_a4${yn === "no" ? "n" : "y"}`, pt = "Also, ～ ＝ それに、～";
+    if (!first && !qrNorm(rec.follow)) add(none("q4", say4, line, pt), `No.4：さいしょは ${std}`);
+    else {
+      const thinkSo = /\bi (?:don't |do not )?think\b/.test(first);
+      const r = qrReasons(rec.follow), f = qrNorm(rec.follow);
+      const cuz = new RegExp(`^${LEAD}(cuz|cause|coz)\\b`).test(f) || /\b(cuz|coz)\b/.test(f);
+      const mark = thinkSo && r === 2 ? "◎" : (thinkSo && r === 1) || r === 2 ? "○" : "△";
+      add({ id: "q4", mark, count: null,
+        good: r === 2 ? "りゆうを 2つ 言えたね！" : r === 1 ? "りゆうを 言えたね。" : thinkSo ? `${std} で 言えたね。` : "がんばって 答えられたね。",
+        tip: !thinkSo ? `さいしょは ${std} と 言おう。` : r < 2 ? "Also, ～ で りゆうを もう1つ 言おう。"
+          : cuz ? "cuz では なく because と 言おう。" : "つぎも りゆうを 2つ 言おう！",
+        say: say4, sayLine: line, sayLabel: "おてほん", point: pt },
+        !thinkSo ? `No.4：さいしょは ${std}` : "No.4：りゆうを 2つ（Also, ～）");
+    }
+  }
+
+  /* No.5 */
+  {
+    const rec = a.q5 || {}, first = qrNorm(rec.first), yn = yesNoOf(rec, first);
+    const ask = (c.q5.match(/(Do|Are|Have|Can|Did|Would|Will|Is) you\b[^?]*\?\s*$/) || [, "Do"])[1].toLowerCase();
+    const STD = { do: ["Yes, I do.", "No, I don't."], are: ["Yes, I am.", "No, I'm not."], have: ["Yes, I have.", "No, I haven't."],
+      can: ["Yes, I can.", "No, I can't."], did: ["Yes, I did.", "No, I didn't."], would: ["Yes, I would.", "No, I wouldn't."],
+      will: ["Yes, I will.", "No, I won't."], is: ["Yes, it is.", "No, it isn't."] }[ask] || ["Yes, I do.", "No, I don't."];
+    const std = yn === "no" ? STD[1] : STD[0];
+    const model = yn === "no" ? c.a5_no : c.a5_yes;
+    const say5 = `**${std}** → ` + qrEmph(model, /\bAlso,/), line = `c${c.id}_a5${yn === "no" ? "n" : "y"}`;
+    const pt = `${c.q5.match(/(Do|Are|Have|Can|Did|Would|Will|Is) you/)?.[0] || "Do you"} ～? → ${STD[0]} / ${STD[1]}`;
+    if (!first && !qrNorm(rec.follow)) add(none("q5", say5, line, pt), `No.5：${STD[0]} ／ ${STD[1]}`);
+    else {
+      const firstOK = first.split(" ").length >= 2;
+      const r = qrReasons(rec.follow);
+      const mark = firstOK && r === 2 ? "◎" : (firstOK && r === 1) || r === 2 ? "○" : "△";
+      const yes = yn !== "no";
+      add({ id: "q5", mark, count: null,
+        good: r === 2 ? (yes ? "自分の ことを 2つ 言えたね！" : "りゆうを 2つ 言えたね！") : r === 1 ? (yes ? "自分の ことを 言えたね。" : "りゆうを 言えたね。")
+          : firstOK ? `${std} と 言えたね。` : "がんばって 答えられたね。",
+        tip: !firstOK ? `${yes ? "Yes" : "No"} だけで なく ${std} と 言おう。`
+          : r < 2 ? (yes ? "Please tell me more. の あとは 2文 話そう。" : "Why not? の あとは りゆうを 2つ。") : "つぎも 2文で 話そう！",
+        say: say5, sayLine: line, sayLabel: "おてほん", point: pt },
+        !firstOK ? `No.5：${STD[0]} ／ ${STD[1]}` : "No.5：聞かれたら 2文で 話す");
+    }
+  }
+
+  /* overall */
+  const heard = items.filter(i => i.mark !== "-");
+  const best = heard.filter(i => i.mark === "◎").map(i => (i.id === "read" ? "音読" : "No." + i.id.slice(1)));
+  const q2 = items.find(i => i.id === "q2");
+  const praise = !heard.length ? "答えが 聞きとれなかったみたい。マイクを たしかめよう。"
+    : q2 && q2.count >= 5 ? "No.2 で 5人 ぜんぶ 言えたね！ すごい！"
+    : best.length ? `${best.join("・")} が ◎ だったね！ よく がんばったね。` : "さいごまで よく がんばったね！";
+  const order = ["q4", "q2", "q1", "q5", "q3", "read"];
+  const picked = goals.sort((x, y) => x.rank - y.rank || order.indexOf(x.id) - order.indexOf(y.id)).slice(0, 2).map(g => g.goal);
+  if (heard.length && picked.length < 2) picked.push("つぎの カードにも ちょうせんしよう！");
+  const asked = Object.values(session.pardon || {}).reduce((x, y) => x + y, 0);
+  return {
+    auto: true,
+    overall: { praise, goals: heard.length ? picked : [], note: asked >= 1 && asked <= 2 ? "聞きとれない ときに、英語で Pardon? と 聞けたね。" : "" },
+    items
+  };
+}
+
+if (typeof module !== "undefined") module.exports = { isRepeatAsk, collapsePhrases, quickReview, qrPeople, qrStem, qrReasons };
+
 const loadPic = src => new Promise(res => {
   const im = new Image(); const t = setTimeout(res, 8000);
   im.onload = im.onerror = () => { clearTimeout(t); res(); };
@@ -592,7 +858,7 @@ if (!WEB && window.claude && typeof window.claude.use === "function") {
 }
 
 /* ---------- views ---------- */
-const VIEWS = ["v-home", "v-ready", "v-room", "v-review", "v-result", "v-history", "v-parent"];
+const VIEWS = ["v-home", "v-ready", "v-room", "v-review", "v-history", "v-parent"];
 function show(id) {
   if (!$("zoom").hidden) closeZoom();
   VIEWS.forEach(v => { $(v).hidden = v !== id; });
@@ -653,6 +919,7 @@ function renderHome() {
     current = Number(b.dataset.id); prefs.last = current; savePrefs(); renderHome();
   }));
   const lastRv = history.find(s => s.review && s.review.overall && s.review.overall.goals && s.review.overall.goals.length);
+  $("goal-home").hidden = WEB && !lastRv;
   const goals = lastRv ? lastRv.review.overall.goals : FIRST_GOALS;
   const from = lastRv ? `${fmtDate(lastRv.startedAt).split(" ")[0]} カード${lastRv.cardId}の講評から` : "11/1 の練習から";
   $("goal-home").innerHTML = `<h3>つぎの めあて <span class="note">（${esc(from)}）</span></h3><ul>${goals.map(g => `<li>${esc(g)}</li>`).join("")}</ul>`;
@@ -823,9 +1090,9 @@ requestAnimationFrame(tick);
 const STAGES = [["enter", "入室"], ["silent", "黙読"], ["read", "音読"], ["q1", "No.1"], ["q2", "No.2"], ["q3", "No.3"],
   ["q4", "No.4"], ["q5", "No.5"], ["exit", "退室"]];
 const FLOW = [
-  { id: "hello", line: "hello", stage: "enter", wait: "next", hint: "娘さんが Hello. と言ったら「つぎへ」" },
+  { id: "hello", line: "hello", stage: "enter", wait: "next", hint: "Hello. と言ったら「つぎへ」" },
   { id: "card_please", line: "card_please", stage: "enter", wait: "handover", hint: "面接カードをわたします（カードをタップ）" },
-  { id: "seat", line: "seat", stage: "enter", wait: "next", hint: "Thank you. と言ってすわったら「つぎへ」" },
+  { id: "seat", line: "seat", stage: "enter", wait: "next", hint: "Thank you. と言って すわったら「つぎへ」" },
   { id: "name", line: "name", stage: "enter", wait: "next", hint: "My name is ～. と答えたら「つぎへ」" },
   { id: "grade", line: "grade", stage: "enter", wait: "next", hint: "OK. と答えたら「つぎへ」" },
   { id: "howareyou", line: "howareyou", stage: "enter", wait: "next", hint: "I'm fine, thank you. と答えたら「つぎへ」" },
@@ -840,8 +1107,8 @@ const FLOW = [
   { id: "q4", line: "q4", stage: "q4", wait: "answer", key: "q4", follow: true },
   { id: "q5", line: "q5", stage: "q5", wait: "answer", key: "q5", follow: true },
   { id: "end", line: "end", stage: "exit", wait: "giveback" },
-  { id: "go", line: "go", stage: "exit", wait: "next", hint: "娘さんが Thank you. と言ったら「つぎへ」" },
-  { id: "bye", line: "bye", stage: "exit", wait: "last", hint: "You too. Goodbye. と言って退室したら「おわり」" }
+  { id: "go", line: "go", stage: "exit", wait: "next", hint: "Thank you. と言ったら「つぎへ」" },
+  { id: "bye", line: "bye", stage: "exit", wait: "last", hint: "You too. Goodbye. と言って 部屋を出たら「おわり」" }
 ];
 const ENTRY_SKIP = FLOW.findIndex(s => s.id === "start_card");
 const lineId = (step, card) => ["q1", "q3", "q4", "q5"].includes(step.line) ? `c${card.id}_${step.line}` : step.line;
@@ -855,7 +1122,7 @@ let S = null;   // the running interview
 function startInterview(cardId, entrance) {
   stopAll();
   const card = cardById(cardId);
-  S = { card, idx: entrance ? 0 : ENTRY_SKIP, answers: {}, repeats: {}, lastLine: null, follow: null,
+  S = { card, idx: entrance ? 0 : ENTRY_SKIP, answers: {}, repeats: {}, pardon: {}, lastLine: null, follow: null,
         startedAt: new Date().toISOString(), id: "s" + Date.now().toString(36), timer: null, alive: true };
   setDesk("empty");
   show("v-room");
@@ -873,8 +1140,9 @@ function setStatus(html, speaking) {
   $("cstatus").innerHTML = (speaking ? '<span class="wave" aria-hidden="true"><i></i><i></i><i></i></span>' : "") + html;
 }
 const ANSWER_HOW = "Win＋H（iPadはキーボードの🎤）。聞き返し（Pardon?）は「もう一度きく」。";
-const ANSWER_HOW_WEB = "質問が終わると自動で聞き取ります。聞き返し（Pardon?）は「もう一度きく」。字がまちがっていたら欄で直せます。";
+const ANSWER_HOW_WEB = "質問が おわると 自動で 聞きとります。聞きとれなかったら Pardon? と言うと、もう一度 読んでくれます。";
 const answerHow = step => (WEB ? ANSWER_HOW_WEB : ANSWER_HOW) + (step.stage === "q2" || step.stage === "q3" ? "絵はタップすると大きくなります。" : "");
+const answerStatus = () => (WEB ? "英語で 答えよう → 答えおわったら「こたえた」" : "娘さんの答えを文字に → 「こたえた」");
 function setControls({ main = null, again = false, answer = false, how = "" } = {}) {
   $("btn-main").hidden = !main;
   if (main) $("btn-main").textContent = main;
@@ -884,11 +1152,11 @@ function setControls({ main = null, again = false, answer = false, how = "" } = 
   $("yn-ask").hidden = true; $("empty-ask").hidden = true;
   $("ans-warn").hidden = true;
 }
-async function speakStep(id) {
+async function speakStep(id, note) {
   S.lastLine = id;
   listening = false;
   setControls();
-  setStatus("面接官が話しています", true);
+  setStatus(note || "面接官が話しています", true);
   const s = S;
   await say(id);
   return s === S && s.alive;
@@ -903,14 +1171,14 @@ async function runStep() {
   listening = true;
   switch (step.wait) {
     case "next":
-      setStatus(esc(step.hint || "娘さんが答えたら「つぎへ」"));
+      setStatus(esc(step.hint || "答えたら「つぎへ」"));
       setControls({ main: "つぎへ ▶", again: true }); focusMain(); break;
     case "handover":
       setDesk("idcard");
-      setStatus("娘さんが Here you are. と言って、面接カードをタップ");
+      setStatus("Here you are. と言って、面接カードをタップ");
       setControls({ main: "わたした ▶", again: true }); break;
     case "auto":
-      setStatus("娘さんが Thank you. と言ってカードを受け取ります");
+      setStatus("Thank you. と言って カードを受け取ります");
       await wait(FAST ? 200 : 2200); if (S && S.alive && FLOW[S.idx] === step) next(); break;
     case "timer": startTimer(FAST ? 2 : 20); break;
     case "pause":
@@ -920,21 +1188,21 @@ async function runStep() {
       setStatus(esc(step.hint));
       setControls({ main: "おわり ▶" }); focusMain(); break;
     case "read":
-      setStatus("娘さんがタイトルから音読します");
-      setControls({ main: "よみおわった ▶", answer: true, how: WEB ? "音読も聞き取っています（読みとばしを講評で見ます）。"
+      setStatus(WEB ? "タイトルから 声に出して 読もう → 読みおわったら「よみおわった」" : "タイトルから音読します");
+      setControls({ main: "よみおわった ▶", answer: true, how: WEB ? "音読も 聞きとっています。"
         : "音読も Win＋H（iPadは🎤）で文字にしておくと、読みとばしを講評で見ます（しなくてもOK）。" });
       $("ans").value = ""; earListen(); break;
     case "answer":
-      setStatus(WEB ? "娘さんが答えます → 答え終わったら「こたえた」" : "娘さんの答えを文字に → 「こたえた」");
+      setStatus(answerStatus());
       setControls({ main: "こたえた ▶", again: true, answer: true, how: answerHow(step) });
       $("ans").value = ""; if (WEB) earListen(); else focusAnswer(); break;
     case "turn":
       setDesk("card", true);
-      setStatus("娘さんがカードを裏返します（カードをタップ）");
+      setStatus("カードを裏返します（カードをタップ）");
       setControls({ main: "うらがえした ▶", again: true }); break;
     case "giveback":
       setDesk("back", true);
-      setStatus("娘さんが Here you are. と言って、カードを返します（カードをタップ）");
+      setStatus("Here you are. と言って、カードを返します（カードをタップ）");
       setControls({ main: "かえした ▶", again: true }); break;
     case "done":
       listening = false; setStatus("おつかれさまでした"); setControls();
@@ -1038,21 +1306,28 @@ document.addEventListener("keydown", e => {
     e.preventDefault(); mainAction();
   }
 });
-$("btn-again").addEventListener("click", async () => {
-  if (!S || !S.lastLine) return;
-  const key = FLOW[S.idx]?.key || FLOW[S.idx]?.id;
-  S.repeats[key] = (S.repeats[key] || 0) + 1;
-  const step = FLOW[S.idx];
+$("btn-again").addEventListener("click", () => askAgain(false));
+/* the examiner says the last line again: the "もう一度きく" button, or "Pardon?" heard (spoken = true) */
+async function askAgain(spoken) {
+  const s = S;
+  if (!s || !s.alive || !s.lastLine || s.asking) return;
+  const step = FLOW[s.idx];
+  const key = step?.key || step?.id;
+  s.asking = true;
+  s.repeats[key] = (s.repeats[key] || 0) + 1;
+  if (spoken) s.pardon[key] = (s.pardon[key] || 0) + 1;
   earAbort();
-  const keep = WEB ? "" : $("ans").value;
-  const ok = await speakStep(S.lastLine);
+  const keep = WEB || spoken ? "" : $("ans").value;
+  $("ans").value = "";
+  const ok = await speakStep(s.lastLine, spoken ? "Pardon? が 聞こえたので、もう一度 読みます" : "");
+  s.asking = false;
   if (!ok) return;
   listening = true;
   restoreWait(step, keep);
-});
+}
 function restoreWait(step, keep) {
   if (step.wait === "answer") {
-    setStatus("娘さんの答えを文字に → 「こたえた」");
+    setStatus(answerStatus());
     setControls({ main: "こたえた ▶", again: true, answer: true, how: answerHow(step) });
     $("ans").value = keep || ""; jaCheck("ans", "ans-warn");
     if (WEB) earListen(); else focusAnswer();
@@ -1063,7 +1338,6 @@ function restoreWait(step, keep) {
   }
 }
 
-const PARDON = /^(pardon|sorry|excuse me|could you (say|repeat)|can you (say|repeat)|one more time|once more|again|what)\b/i;
 function yesNo(t) {
   const s = t.toLowerCase().replace(/[^a-z' ]/g, " ").replace(/\s+/g, " ").trim();
   if (/^(no|nope|know|not really|i don't|i dont|i do not|i'm not|i am not|i never|i think not)\b/.test(s)) return "no";
@@ -1075,11 +1349,7 @@ function submitAnswer(force) {
   const t = $("ans").value.trim();
   if (!t && !force) { $("empty-ask").hidden = false; return; }
   $("empty-ask").hidden = true;
-  if (t && t.length < 40 && PARDON.test(t)) {
-    $("ans").value = "";
-    $("btn-again").click();
-    return;
-  }
+  if (t && isRepeatAsk(t)) { askAgain(true); return; }
   if (step.follow) {
     const a = S.answers[step.key] || (S.answers[step.key] = {});
     if (!S.follow) {
@@ -1112,7 +1382,7 @@ async function askFollow(yn) {
   const ok = await speakStep(line);
   if (!ok) return;
   listening = true;
-  setStatus(WEB ? "娘さんが答えます → 答え終わったら「こたえた」" : "娘さんの答えを文字に → 「こたえた」");
+  setStatus(answerStatus());
   setControls({ main: "こたえた ▶", again: true, answer: true, how: WEB ? answerHow(step) : "Win＋H（iPadはキーボードの🎤）。" });
   if (WEB) earListen(); else focusAnswer();
 }
@@ -1126,12 +1396,19 @@ async function finishInterview() {
   stopAll();
   const session = {
     v: 1, id: s.id, cardId: s.card.id, cardTitle: s.card.title, startedAt: s.startedAt,
-    finishedAt: new Date().toISOString(), answers: s.answers, repeats: s.repeats, review: null
+    finishedAt: new Date().toISOString(), answers: s.answers, repeats: s.repeats, pardon: s.pardon, review: null
   };
   S = null;
+  if (WEB) withQuick(session);     // no Claude on the web page: a simple automatic review right away
   history = [session, ...history.filter(h => h.id !== session.id)];
   await saveSession(session, true);
-  if (WEB) openResult(session); else openReview(session, true);
+  openReview(session, !WEB);
+}
+function withQuick(session) {
+  if (!session.review) {
+    try { session.review = quickReview(session, cardById(session.cardId)); session.reviewedAt = new Date().toISOString(); } catch (e) {}
+  }
+  return session;
 }
 async function saveSession(session, create) {
   if (WEB) { webSave(); return true; }
@@ -1308,10 +1585,11 @@ function itemHtml(key, c, session, it) {
   const fb = it ? `
     ${it.good ? `<div class="fb"><span class="ic" aria-hidden="true">👍</span><p>${esc(it.good)}</p></div>` : ""}
     ${it.tip ? `<div class="fb"><span class="ic" aria-hidden="true">💡</span><p>${esc(it.tip)}</p></div>` : ""}
-    ${it.say ? `<div class="say"><span class="lab">こう いってみよう</span>${sayHtml}
-      ${enVoice ? `<div><button class="play" type="button" data-say="${esc(it.say.replace(/\*\*/g, ""))}">🔊 きいてみる</button></div>` : ""}</div>` : ""}
+    ${it.say ? `<div class="say"><span class="lab">${esc(it.sayLabel || "こう いってみよう")}</span>${sayHtml}
+      ${it.sayLine ? `<div><button class="play" type="button" data-line="${esc(it.sayLine)}">🔊 きいてみる</button></div>`
+        : enVoice ? `<div><button class="play" type="button" data-say="${esc(it.say.replace(/\*\*/g, ""))}">🔊 きいてみる</button></div>` : ""}</div>` : ""}
     ${it.point ? `<p class="point">${esc(it.point)}</p>` : ""}` : "";
-  const model = info.model ? `<details class="model"><summary>おてほん</summary>
+  const model = info.model && !(it && it.sayLine) ? `<details class="model"><summary>おてほん</summary>
     <p class="en">${key === "q2" ? c.a2.map(esc).join("<br>") : esc(info.modelText(c, yn))}</p><button class="play" type="button" data-line="${info.model(c, yn)}">🔊 おてほんを聞く</button></details>` : "";
   return `<article class="box item" data-key="${key}">${head}${vis}${said}${fb}${model}</article>`;
 }
@@ -1326,7 +1604,9 @@ function renderReview(session) {
   const top = `<div class="hero"><div class="face">${faceImg()}</div><div style="display:grid;gap:8px;min-width:0">
       <h2>おつかれさま！</h2><p class="note">カード ${c.id}　<span class="en">${esc(c.title)}</span>　${esc(fmtDate(session.startedAt))}</p>${summary}</div></div>`;
   const overall = r ? `<div class="box"><p class="praise">${esc(r.overall.praise)}</p>
-      ${r.overall.goals.length ? `<div class="goals"><h3>つぎの めあて</h3><ul>${r.overall.goals.map(g => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}</div>` : "";
+      ${r.overall.note ? `<p>${esc(r.overall.note)}</p>` : ""}
+      ${r.overall.goals.length ? `<div class="goals"><h3>つぎの めあて</h3><ul>${r.overall.goals.map(g => `<li>${esc(g)}</li>`).join("")}</ul></div>` : ""}
+      ${r.auto ? `<p class="note">これは 自動の かんたんな ふりかえりです。</p>` : ""}</div>` : "";
   const body = r ? order.map(k => itemHtml(k, c, session, byId[k])).join("") : "";
   $("review").innerHTML = `${top}<div class="rv-layout">
       <div class="rv-main" id="rv-body">${overall}${body}</div>
@@ -1335,8 +1615,15 @@ function renderReview(session) {
     <p class="note">◎○△は目安です。答えは音声入力の文字なので、聞き取りのまちがいがまざることがあります。</p>
     <div class="btnrow"><button class="btn" id="rv-again" type="button">▶ もう一度（同じカード）</button>
       <button class="btn quiet" id="rv-home" type="button">ほかのカードをえらぶ</button>
-      <button class="btn quiet" id="rv-hist" type="button">これまでの記録</button></div>`;
+      <button class="btn quiet" id="rv-hist" type="button">これまでの記録</button></div>
+    ${WEB ? `<div class="box parent-box">
+      <h3>おうちの方へ：Claude の講評を受けるとき</h3>
+      <p class="note">上は、このページが自動でつけた かんたんな ふりかえりです。くわしい講評は「結果をコピー」を押して、Claude のチャットか練習アプリに貼り付けてください。</p>
+      <div class="btnrow"><button class="btn quiet" id="rv-copy" type="button">📋 結果をコピー</button></div>
+      <p class="status" id="rv-copy-status" role="status" aria-live="polite"></p>
+      <textarea id="rv-copy-box" rows="3" readonly hidden></textarea></div>` : ""}`;
   $("rv-again").addEventListener("click", () => { current = session.cardId; show("v-ready"); });
+  if (WEB) $("rv-copy").addEventListener("click", () => copyResult(session));
   $("rv-home").addEventListener("click", goHome);
   $("rv-hist").addEventListener("click", () => { renderHistory(); show("v-history"); });
   if (!r && !session.reviewing) {
@@ -1401,14 +1688,17 @@ function wirePlay() {
 
 /* ---------- history ---------- */
 function renderHistory() {
-  $("hist-status").textContent = WEB ? (history.length ? "この端末に残っている記録です。押すと結果をもう一度コピーできます。" : "まだ記録がありません。")
+  $("hist-status").textContent = WEB ? (history.length ? "この端末に残っている記録です。押すと ふりかえりが 見られます（Claude 用の結果コピーも そこから）。" : "まだ記録がありません。")
     : !caps.db ? "この画面では記録を保存できません（この回の記録は、ページを閉じるまで残ります）。"
     : (!historyLoaded ? "読み込んでいます…" : (history.length ? "" : "まだ記録がありません。"));
   $("hist").innerHTML = history.map(s => `<button class="hrow" type="button" data-id="${esc(s.id)}">
       <span><b>${esc(fmtDate(s.startedAt))}</b>　カード ${s.cardId} <span class="en">${esc(s.cardTitle || "")}</span></span>
       <span class="marks">${s.review ? qMarks(s).map(m => markHtml(m, true)).join("") : '<span class="note">講評なし</span>'}</span></button>`).join("");
   $("hist").querySelectorAll(".hrow").forEach(b => b.addEventListener("click", () => {
-    const s = history.find(h => h.id === b.dataset.id); if (s) (WEB ? openResult(s) : openReview(s, false));
+    const s = history.find(h => h.id === b.dataset.id);
+    if (!s) return;
+    if (WEB && !s.review) { withQuick(s); webSave(); }
+    openReview(s, false);
   }));
 }
 
@@ -1451,48 +1741,59 @@ $("btn-pdf").addEventListener("click", async () => {
 
 /* ---------- web version: the browser listens in English (Web Speech API) ---------- */
 const SRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-const EAR = { rec: null, want: false, final: "", interim: "", onText: null, state: "off", endWait: null, lastSet: "" };
+const APPLE = /Apple/.test(navigator.vendor || "");      // iPad / iPhone / Mac Safari (WebKit)
+const TOUCH = "ontouchend" in document;
+const EAR = { rec: null, want: false, prev: "", sess: "", tailFinal: false, onText: null, state: "off", endWait: null, lastSet: "", askTimer: null };
 function earMake() {
   const r = new SRec();
   r.lang = "en-US"; r.continuous = true; r.interimResults = true; r.maxAlternatives = 1;
-  r.onstart = () => earState("on");
-  r.onspeechstart = () => earState("heard");
-  r.onspeechend = () => { if (EAR.want) earState("on"); };
+  const mine = () => r === EAR.rec;
+  r.onstart = () => { if (mine()) earState("on"); };
+  r.onspeechstart = () => { if (mine()) earState("heard"); };
+  r.onspeechend = () => { if (mine() && EAR.want) earState("on"); };
   r.onresult = e => {
-    let interim = "";
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript.trim();
-      if (!t) continue;
-      if (e.results[i].isFinal) EAR.final = (EAR.final + " " + t).trim();
-      else interim += " " + t;
-    }
-    EAR.interim = interim.trim();
+    if (!mine()) return;
+    const parts = [];
+    for (let i = 0; i < e.results.length; i++) parts.push(e.results[i][0].transcript);
+    EAR.sess = collapsePhrases(parts);          // Safari can repeat earlier phrases: do not double the words
+    EAR.tailFinal = e.results.length > 0 && Boolean(e.results[e.results.length - 1].isFinal);
     if (EAR.onText) EAR.onText(earText());
   };
   r.onerror = e => {
+    if (!mine()) return;
     if (e.error === "not-allowed" || e.error === "service-not-allowed") { EAR.want = false; earState("denied"); }
     else if (e.error === "audio-capture") { EAR.want = false; earState("nomic"); }
   };
   r.onend = () => {
-    if (EAR.want) {            // the browser stops after a silence: keep listening until the parent says so
-      setTimeout(() => { if (EAR.want) { try { r.start(); } catch (err) {} } }, 120);
+    if (!mine()) return;
+    EAR.prev = earText(); EAR.sess = "";        // keep what was heard before the browser stopped
+    if (EAR.want) {            // the browser stops after a silence: keep listening until the answer is done
+      setTimeout(() => {
+        if (!EAR.want || !mine()) return;
+        if (APPLE) { EAR.rec = earMake(); try { EAR.rec.start(); } catch (err) {} }   // Safari: a fresh recognizer
+        else { try { r.start(); } catch (err) {} }
+      }, 120);
       return;
     }
-    if (EAR.interim) { EAR.final = (EAR.final + " " + EAR.interim).trim(); EAR.interim = ""; }
     if (!["denied", "nomic"].includes(EAR.state)) earState("off");
     if (EAR.endWait) { EAR.endWait(); EAR.endWait = null; }
   };
   return r;
 }
-const earText = () => (EAR.final + " " + EAR.interim).replace(/\s+/g, " ").trim();
+const earText = () => (EAR.prev + " " + EAR.sess).replace(/\s+/g, " ").trim();
 function earStart(onText) {
   if (!SRec) { earState("unsupported"); return false; }
+  EAR.prev = ""; EAR.sess = ""; EAR.tailFinal = false; EAR.onText = onText; EAR.want = true;
+  if (APPLE && EAR.rec) {      // Safari: a new recognizer for each answer (reusing one can stop giving results)
+    const old = EAR.rec; EAR.rec = null;
+    try { old.abort(); } catch (e) {}
+  }
   if (!EAR.rec) EAR.rec = earMake();
-  EAR.final = ""; EAR.interim = ""; EAR.onText = onText; EAR.want = true;
   try { EAR.rec.start(); } catch (e) { earState("on"); }   // already running: keep it
   return true;
 }
 function earStop() {
+  clearTimeout(EAR.askTimer);
   return new Promise(res => {
     if (!EAR.rec || !EAR.want) { EAR.want = false; res(earText()); return; }
     EAR.want = false;
@@ -1502,13 +1803,15 @@ function earStop() {
   });
 }
 function earAbort() {
-  if (!EAR.rec) return;
+  clearTimeout(EAR.askTimer);
   EAR.want = false; EAR.onText = null;
+  if (!EAR.rec) return;
   try { EAR.rec.abort(); } catch (e) {}
 }
 const EAR_LABEL = {
-  off: "止まっています", on: "🎤 聞いています（娘さんが話してください）", heard: "🎤 声が聞こえています",
-  denied: "マイクが使えません。アドレスバーのマイク（またはカギ）のマークから「許可」にしてください",
+  off: "止まっています", on: "🎤 聞いています（英語で 話してね）", heard: "🎤 声が 聞こえています",
+  denied: APPLE && TOUCH ? "マイクが使えません。設定アプリの Safari（iPadOS 18 以降は「アプリ」→ Safari）で「マイク」を「許可」にしてから、ページを開き直してください"
+    : "マイクが使えません。アドレスバーのマイク（またはカギ）のマークから「許可」にしてください",
   nomic: "マイクが見つかりません。マイクがつながっているか確かめてください",
   unsupported: "このブラウザでは聞き取りが使えません（パソコンは Chrome か Edge、iPad は Safari で開いてください）"
 };
@@ -1523,11 +1826,23 @@ function earState(st) {
   $("ear-btn").hidden = st === "unsupported";
   $("ear-test-btn").textContent = listeningNow && EAR.onText === earTestShow ? "止める" : "🎤 マイクを試す";
 }
+/* listen for the answer; on the five questions, "Pardon?" makes the examiner read the question again */
 function earListen() {
   if (!WEB) return;
   $("ear").hidden = false;
   EAR.lastSet = $("ans").value;
-  earStart(t => { if ($("ans").value === EAR.lastSet) { $("ans").value = t; EAR.lastSet = t; } });
+  const step = S && FLOW[S.idx];
+  const canAsk = Boolean(step && step.wait === "answer");
+  earStart(t => {
+    if ($("ans").value === EAR.lastSet) { $("ans").value = t; EAR.lastSet = t; }
+    clearTimeout(EAR.askTimer);
+    if (canAsk && isRepeatAsk(t)) {
+      // wait a moment: if she goes on talking, it was not a question to the examiner
+      EAR.askTimer = setTimeout(() => {
+        if (EAR.want && isRepeatAsk(earText()) && S && FLOW[S.idx] === step) askAgain(true);
+      }, FAST ? 150 : EAR.tailFinal ? 600 : 1300);
+    }
+  });
 }
 async function earFinish() {
   const typedOver = $("ans").value !== EAR.lastSet;     // the parent corrected the text by hand: keep it
@@ -1551,29 +1866,20 @@ const WEB_KEY = "eiken-p2-web-sessions";
 function webLoad() { try { return JSON.parse(localStorage.getItem(WEB_KEY) || "[]"); } catch (e) { return []; } }
 function webSave() { try { localStorage.setItem(WEB_KEY, JSON.stringify(history.slice(0, 40))); } catch (e) {} }
 const resultText = s => "EIKEN-P2-RESULT v1\n" + JSON.stringify({ id: s.id, cardId: s.cardId, cardTitle: s.cardTitle,
-  startedAt: s.startedAt, finishedAt: s.finishedAt, answers: s.answers, repeats: s.repeats });
-function openResult(session) {
-  show("v-result");
-  $("copy-status").textContent = "";
-  $("copy-box").hidden = true;
-  $("copy-box").value = resultText(session);
-  const a = session.answers || {};
-  const rows = [["音読", a.read?.text], ["No.1", a.q1?.text], ["No.2", a.q2?.text], ["No.3", a.q3?.text],
-    ["No.4", [a.q4?.first, a.q4?.follow].filter(Boolean).join(" ／ ")], ["No.5", [a.q5?.first, a.q5?.follow].filter(Boolean).join(" ／ ")]];
-  $("result-answers").innerHTML = `<p class="note">カード ${session.cardId}　<span class="en">${esc(session.cardTitle || "")}</span>　${esc(fmtDate(session.startedAt))}</p>`
-    + rows.map(([k, t]) => `<div class="res-item"><b>${k}</b><span class="en">${esc(t || "（答えなし）")}</span></div>`).join("");
-}
-$("btn-copy").addEventListener("click", () => {
-  const text = $("copy-box").value;
+  startedAt: s.startedAt, finishedAt: s.finishedAt, answers: s.answers, repeats: s.repeats, pardon: s.pardon || {} });
+function copyResult(session) {
+  const text = resultText(session), box = $("rv-copy-box"), st = $("rv-copy-status");
+  box.value = text;
   const fallback = () => {
-    $("copy-box").hidden = false; $("copy-box").focus(); $("copy-box").select();
-    $("copy-status").textContent = "自動でコピーできませんでした。下の欄を全部選んでコピーしてください（Ctrl＋C）。";
+    box.hidden = false; box.focus(); box.select();
+    st.textContent = TOUCH ? "自動でコピーできませんでした。下の欄を長押しして「すべてを選択」→「コピー」してください。"
+      : "自動でコピーできませんでした。下の欄を全部選んでコピーしてください（Ctrl＋C）。";
   };
   try {
     navigator.clipboard.writeText(text).then(
-      () => { $("copy-status").textContent = "コピーしました。Claude の練習アプリに貼り付けてください。"; }, fallback);
+      () => { st.textContent = "コピーしました。Claude のチャットか練習アプリに貼り付けてください。"; }, fallback);
   } catch (e) { fallback(); }
-});
+}
 
 /* artifact version: paste a result from the web version and get the review */
 function parseResult(text) {
@@ -1606,9 +1912,14 @@ function setupMode() {
   $("dict-os").hidden = WEB; $("dict-web").hidden = !WEB;
   $("h-dict").textContent = WEB ? "2. 娘さんの答えを聞き取る準備" : "2. 娘さんの答えを文字にする方法";
   $("paste-box").hidden = WEB;
-  $("goal-home").hidden = WEB;
-  if (WEB) {
-    $("ans").placeholder = "聞き取った英語がここに出ます（まちがいはここで直せます）";
+  if (WEB) {      // the child may be practising alone (iPad): plain words for her
+    $("ans").placeholder = "聞きとった英語が ここに出ます";
+    $("who").textContent = "つぎに すること";
+    $("yn-q").textContent = "Yes と No、どちらで 答えた？";
+    $("empty-q").textContent = "答えが 聞きとれませんでした。" + (TOUCH ? "（何回やっても 文字が出ないときは、下の欄をタップして キーボードの🎤でも 入れられます）" : "");
+    $("empty-back").textContent = "もう一度 答える";
+    $("empty-go").textContent = "このまま すすむ";
+    $("pardon-web").hidden = false;
     history = webLoad(); historyLoaded = true;
     if (!SRec) earState("unsupported");
   } else if (/^https:\/\//.test(WEB_URL)) {
