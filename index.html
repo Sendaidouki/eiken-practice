@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
+<link rel="apple-touch-icon" href="img/icon-180.png">
+<link rel="icon" type="image/png" href="img/icon-64.png">
+<meta name="apple-mobile-web-app-title" content="英検めんせつ">
 <style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>英検準2級 面接練習</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -389,6 +392,7 @@ footer { font-size: 0.8rem; color: var(--muted); }
             <button class="btn quiet" id="ear-test-btn" type="button">🎤 マイクを試す</button></div>
           <div class="ear-text en" id="ear-test-text"></div>
           <p class="note">パソコンは Chrome か Edge、iPad は Safari で開いてください。</p>
+          <p class="note" id="standalone-note" hidden>ホーム画面のアイコンから「Webアプリ」として開いています。マイクを試しても英語の文字が出ないときは、アイコンを作り直し、「ホーム画面に追加」の画面で「Webアプリとして開く」をオフにしてください（Safari で開くようになります）。</p>
         </div>
       </div>
     </div>
@@ -1920,6 +1924,8 @@ function setupMode() {
     $("empty-back").textContent = "もう一度 答える";
     $("empty-go").textContent = "このまま すすむ";
     $("pardon-web").hidden = false;
+    const standalone = navigator.standalone === true || Boolean(window.matchMedia && matchMedia("(display-mode: standalone)").matches);
+    $("standalone-note").hidden = !standalone;
     history = webLoad(); historyLoaded = true;
     if (!SRec) earState("unsupported");
   } else if (/^https:\/\//.test(WEB_URL)) {
